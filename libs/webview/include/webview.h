@@ -266,6 +266,11 @@ WEBVIEW_API void webview_set_size(webview_t w, int width, int height,
                                   webview_hint_t hints);
 
 /**
+ * Set native window visibility. Windows only; no-op on other platforms.
+ */
+WEBVIEW_API void webview_set_visible(webview_t w, int visible);
+
+/**
  * Navigates webview to the given URL. URL may be a properly encoded data URI.
  *
  * Example:
@@ -3178,11 +3183,8 @@ public:
     CreateWindowExW(0, L"webview_message", nullptr, 0, 0, 0, 0, 0, HWND_MESSAGE,
                     nullptr, hInstance, this);
 
-    if (m_owns_window) {
-      ShowWindow(m_window, SW_SHOW);
-      UpdateWindow(m_window);
-      SetFocus(m_window);
-    }
+    // Do not show here; allow embedding applications to control when to reveal
+    // the window to avoid first-frame flash issues on Windows.
 
     auto cb =
         std::bind(&win32_edge_engine::on_message, this, std::placeholders::_1);
@@ -3380,8 +3382,7 @@ private:
     init("window.external={invoke:s=>window.chrome.webview.postMessage(s)}");
     resize_webview();
     m_controller->put_IsVisible(TRUE);
-    ShowWindow(m_widget, SW_SHOW);
-    UpdateWindow(m_widget);
+    // Defer showing widget until application decides to reveal the window.
     if (m_owns_window) {
       focus_webview();
     }
@@ -3551,6 +3552,28 @@ WEBVIEW_API void webview_set_size(webview_t w, int width, int height,
                                   webview_hint_t hints) {
   static_cast<webview::webview *>(w)->set_size(width, height, hints);
 }
+
+#ifdef _WIN32
+WEBVIEW_API void webview_set_visible(webview_t w, int visible) {
+  auto *wv = static_cast<webview::webview *>(w);
+  HWND hwnd = static_cast<HWND>(wv->window());
+  HWND child = static_cast<HWND>(wv->widget());
+  int cmd = visible ? SW_SHOW : SW_HIDE;
+  if (hwnd) {
+    ShowWindow(hwnd, cmd);
+    if (visible) {
+      UpdateWindow(hwnd);
+      SetFocus(hwnd);
+    }
+  }
+  if (child) {
+    ShowWindow(child, cmd);
+    if (visible && hwnd) UpdateWindow(child);
+  }
+}
+#else
+WEBVIEW_API void webview_set_visible(webview_t, int) {}
+#endif
 
 WEBVIEW_API void webview_navigate(webview_t w, const char *url) {
   static_cast<webview::webview *>(w)->navigate(url);
