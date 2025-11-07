@@ -271,6 +271,11 @@ WEBVIEW_API void webview_set_size(webview_t w, int width, int height,
 WEBVIEW_API void webview_set_visible(webview_t w, int visible);
 
 /**
+ * Moves the native window to the specified coordinates.
+ */
+WEBVIEW_API void webview_set_position(webview_t w, int x, int y);
+
+/**
  * Navigates webview to the given URL. URL may be a properly encoded data URI.
  *
  * Example:
@@ -1011,6 +1016,8 @@ if (status === 0) {\
     set_size_impl(width, height, hints);
   }
 
+  void set_position(int x, int y) { set_position_impl(x, y); }
+
   void set_html(const std::string &html) { set_html_impl(html); }
   void init(const std::string &js) { init_impl(js); }
   void eval(const std::string &js) { eval_impl(js); }
@@ -1025,6 +1032,7 @@ protected:
   virtual void dispatch_impl(std::function<void()> f) = 0;
   virtual void set_title_impl(const std::string &title) = 0;
   virtual void set_size_impl(int width, int height, webview_hint_t hints) = 0;
+  virtual void set_position_impl(int x, int y) = 0;
   virtual void set_html_impl(const std::string &html) = 0;
   virtual void init_impl(const std::string &js) = 0;
   virtual void eval_impl(const std::string &js) = 0;
@@ -1357,6 +1365,13 @@ public:
     }
   }
 
+  void set_position_impl(int x, int y) override {
+    if (!m_owns_window) {
+      return;
+    }
+    gtk_window_move(GTK_WINDOW(m_window), x, y);
+  }
+
   void navigate_impl(const std::string &url) override {
     webkit_web_view_load_uri(WEBKIT_WEB_VIEW(m_webview), url.c_str());
   }
@@ -1683,6 +1698,15 @@ public:
                            CGRectMake(0, 0, width, height), YES, NO);
     }
     objc::msg_send<void>(m_window, "center"_sel);
+  }
+
+  void set_position_impl(int x, int y) override {
+    objc::autoreleasepool arp;
+    if (!m_owns_window) {
+      return;
+    }
+    objc::msg_send<void>(m_window, "setFrameTopLeftPoint:"_sel,
+                         CGPointMake(x, y));
   }
   void navigate_impl(const std::string &url) override {
     objc::autoreleasepool arp;
@@ -3293,6 +3317,14 @@ public:
     }
   }
 
+  void set_position_impl(int x, int y) override {
+    if (!m_owns_window) {
+      return;
+    }
+    SetWindowPos(m_window, nullptr, x, y, 0, 0,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
+  }
+
   void navigate_impl(const std::string &url) override {
     auto wurl = widen_string(url);
     m_webview->Navigate(wurl.c_str());
@@ -3574,6 +3606,10 @@ WEBVIEW_API void webview_set_visible(webview_t w, int visible) {
 #else
 WEBVIEW_API void webview_set_visible(webview_t, int) {}
 #endif
+
+WEBVIEW_API void webview_set_position(webview_t w, int x, int y) {
+  static_cast<webview::webview *>(w)->set_position(x, y);
+}
 
 WEBVIEW_API void webview_navigate(webview_t w, const char *url) {
   static_cast<webview::webview *>(w)->navigate(url);

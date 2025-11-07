@@ -92,6 +92,10 @@ type WebView interface {
 	// SetVisible shows/hides the native window (Windows only; no-op on others).
 	SetVisible(show bool)
 
+	// SetPosition moves the native window to the specified coordinates.
+	// On platforms that do not support manual positioning this is a no-op.
+	SetPosition(x int, y int)
+
 	// Navigate navigates webview to the given URL. URL may be a properly encoded data.
 	// URI. Examples:
 	// w.Navigate("https://github.com/webview/webview")
@@ -201,6 +205,10 @@ func (w *webview) SetSize(width int, height int, hint Hint) {
 
 func (w *webview) SetVisible(show bool) {
 	C.webview_set_visible(w.w, boolToInt(show))
+}
+
+func (w *webview) SetPosition(x int, y int) {
+	C.webview_set_position(w.w, C.int(x), C.int(y))
 }
 
 func (w *webview) Init(js string) {
