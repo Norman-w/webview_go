@@ -96,6 +96,10 @@ type WebView interface {
 	// On platforms that do not support manual positioning this is a no-op.
 	SetPosition(x int, y int)
 
+	// WindowState returns the current geometry and state of the native window.
+	// When the underlying window is not yet available, the cached state is returned.
+	WindowState() WindowState
+
 	// Navigate navigates webview to the given URL. URL may be a properly encoded data.
 	// URI. Examples:
 	// w.Navigate("https://github.com/webview/webview")
@@ -133,6 +137,15 @@ type WebView interface {
 
 type webview struct {
 	w C.webview_t
+
+	stateMu        sync.RWMutex
+	cachedState    WindowState
+	hasCachedState bool
+
+	hookMu        sync.Mutex
+	hookInstalled bool
+	origWndProc   uintptr
+	hwnd          uintptr
 }
 
 var (
@@ -162,10 +175,13 @@ func New(debug bool) WebView { return NewWindow(debug, nil) }
 func NewWindow(debug bool, window unsafe.Pointer) WebView {
 	w := &webview{}
 	w.w = C.webview_create(boolToInt(debug), window)
+	w.cachedState = WindowState{State: WindowStateUnknown}
+	ensureWindowHook(w)
 	return w
 }
 
 func (w *webview) Destroy() {
+	removeWindowHook(w)
 	C.webview_destroy(w.w)
 }
 
@@ -201,6 +217,7 @@ func (w *webview) SetTitle(title string) {
 
 func (w *webview) SetSize(width int, height int, hint Hint) {
 	C.webview_set_size(w.w, C.int(width), C.int(height), C.webview_hint_t(hint))
+	setWindowSize(w, width, height)
 }
 
 func (w *webview) SetVisible(show bool) {
@@ -208,7 +225,27 @@ func (w *webview) SetVisible(show bool) {
 }
 
 func (w *webview) SetPosition(x int, y int) {
-	C.webview_set_position(w.w, C.int(x), C.int(y))
+	setWindowPosition(w, x, y)
+}
+
+func (w *webview) WindowState() WindowState {
+	if w == nil {
+		return WindowState{State: WindowStateUnknown}
+	}
+
+	state := getWindowState(w)
+	if state.State != WindowStateUnknown ||
+		state.Width != 0 || state.Height != 0 ||
+		state.X != 0 || state.Y != 0 {
+		w.setCachedState(state)
+		return state
+	}
+
+	if cached, ok := w.cachedStateSnapshot(); ok {
+		return cached
+	}
+
+	return state
 }
 
 func (w *webview) Init(js string) {
@@ -343,4 +380,39 @@ func (w *webview) Unbind(name string) error {
 	defer C.free(unsafe.Pointer(cname))
 	C.CgoWebViewUnbind(w.w, cname)
 	return nil
+}
+
+func (w *webview) updateCachedState(mutator func(*WindowState)) {
+	if w == nil || mutator == nil {
+		return
+	}
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if !w.hasCachedState {
+		w.cachedState = WindowState{State: WindowStateUnknown}
+	}
+	mutator(&w.cachedState)
+	w.hasCachedState = true
+}
+
+func (w *webview) setCachedState(state WindowState) {
+	if w == nil {
+		return
+	}
+	w.stateMu.Lock()
+	w.cachedState = state
+	w.hasCachedState = true
+	w.stateMu.Unlock()
+}
+
+func (w *webview) cachedStateSnapshot() (WindowState, bool) {
+	if w == nil {
+		return WindowState{}, false
+	}
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+	if !w.hasCachedState {
+		return WindowState{}, false
+	}
+	return w.cachedState, true
 }
